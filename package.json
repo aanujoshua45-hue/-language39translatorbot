@@ -1,0 +1,8 @@
+{
+  "name": "language39-translator-bot",
+  "version": "1.0.0",
+  "description": "Telegram translation bot",
+  "scripts": {
+    "start": "python3 bot.py"
+  }
+}
