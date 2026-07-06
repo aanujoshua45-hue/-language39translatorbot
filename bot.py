@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -13,10 +14,40 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ==================== ENVIRONMENT VARIABLES ====================
+# Try multiple ways to get the token
+BOT_TOKEN = None
+
+# Method 1: Direct environment variable
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+
+# Method 2: Check if token is passed as a file (Railway sometimes does this)
+if not BOT_TOKEN:
+    try:
+        with open('/etc/secrets/TELEGRAM_BOT_TOKEN', 'r') as f:
+            BOT_TOKEN = f.read().strip()
+        logger.info("✅ Token loaded from secrets file")
+    except:
+        pass
+
+# Method 3: Check for token in Railway's environment
+if not BOT_TOKEN:
+    # Railway sometimes uses different naming
+    for key in os.environ.keys():
+        if 'TOKEN' in key.upper() and 'BOT' in key.upper():
+            BOT_TOKEN = os.environ.get(key)
+            logger.info(f"✅ Token loaded from: {key}")
+            break
+
+# If still no token, show helpful error
 if not BOT_TOKEN:
     logger.error("❌ TELEGRAM_BOT_TOKEN not found in environment variables")
-    raise ValueError("TELEGRAM_BOT_TOKEN is required")
+    logger.error("Please add TELEGRAM_BOT_TOKEN to Railway Variables")
+    logger.error("Available environment variables:")
+    for key in os.environ.keys():
+        logger.error(f"  - {key}")
+    sys.exit(1)
+
+logger.info(f"✅ Bot token loaded successfully (length: {len(BOT_TOKEN)})")
 
 # ==================== USER DATA STORAGE ====================
 user_languages = {}  # user_id: language_code
@@ -294,8 +325,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
     elif data == 'help':
-        await query.edit_message_text(
-            help_text := """
+        help_text = """
 📖 *Available Commands*
 
 /start - Welcome and setup
@@ -315,13 +345,11 @@ If target language is Spanish:
 Reply: "Hola, ¿cómo estás?"
 
 🔗 *Project:* Language39
-""",
-            parse_mode='Markdown'
-        )
+"""
+        await query.edit_message_text(help_text, parse_mode='Markdown')
         
     elif data == 'about':
-        await query.edit_message_text(
-            about_text := """
+        about_text = """
 🤖 *Language39 Translator Bot*
 
 *Version:* 1.0.0
@@ -338,9 +366,8 @@ Reply: "Hola, ¿cómo estás?"
 *GitHub:* github.com/language39/translator-bot
 
 Made with ❤️ for Language39 Project
-""",
-            parse_mode='Markdown'
-        )
+"""
+        await query.edit_message_text(about_text, parse_mode='Markdown')
         
     elif data == 'back_to_menu':
         current_lang = get_user_language(user_id)
@@ -395,31 +422,50 @@ Start translating now! 🚀
         else:
             await query.edit_message_text("❌ Invalid language selection.")
 
+# ==================== ERROR HANDLER ====================
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors"""
+    logger.error(f"Update {update} caused error {context.error}")
+    if update and update.effective_message:
+        await update.effective_message.reply_text(
+            "❌ Something went wrong. Please try again later."
+        )
+
 # ==================== MAIN FUNCTION ====================
 
 def main():
     """Start the bot"""
     logger.info("🚀 Starting Language39 Translator Bot...")
+    logger.info(f"Bot Token: {BOT_TOKEN[:10]}... (first 10 chars)")
     
-    # Create application
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("setlang", setlang_command))
-    application.add_handler(CommandHandler("languages", languages_command))
-    application.add_handler(CommandHandler("about", about_command))
-    
-    # Add message handler (for text messages)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, translate_message))
-    
-    # Add callback query handler (for inline buttons)
-    application.add_handler(CallbackQueryHandler(button_callback))
-    
-    # Start the bot with polling
-    logger.info("✅ Bot is running and ready to accept messages")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    try:
+        # Create application
+        application = Application.builder().token(BOT_TOKEN).build()
+        
+        # Add command handlers
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("setlang", setlang_command))
+        application.add_handler(CommandHandler("languages", languages_command))
+        application.add_handler(CommandHandler("about", about_command))
+        
+        # Add message handler (for text messages)
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, translate_message))
+        
+        # Add callback query handler (for inline buttons)
+        application.add_handler(CallbackQueryHandler(button_callback))
+        
+        # Add error handler
+        application.add_error_handler(error_handler)
+        
+        # Start the bot with polling
+        logger.info("✅ Bot is running and ready to accept messages")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
